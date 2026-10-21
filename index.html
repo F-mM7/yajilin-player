@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ヤジリン プレイヤー</title>
+<style>
+  :root {
+    --bg: #000000;
+    --panel-bg: #000000;
+    --border: #334155;
+    --fg: #e2e8f0;
+    --muted-fg: #94a3b8;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Segoe UI", Meiryo, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    touch-action: none;
+  }
+  .panel {
+    width: 100%;
+    max-width: 900px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .row + .row {
+    margin-top: 10px;
+  }
+  label.field-label {
+    font-size: 13px;
+    color: var(--muted-fg);
+    white-space: nowrap;
+  }
+  select {
+    flex: 1 1 100px;
+    min-width: 0;
+    padding: 8px 10px;
+    font-size: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-bg);
+    color: var(--fg);
+  }
+  button {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--panel-bg);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    min-height: 44px;
+    cursor: pointer;
+    color: var(--fg);
+    touch-action: manipulation;
+  }
+  button:active {
+    background: #1e293b;
+  }
+  button.pen-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    justify-content: center;
+  }
+  button.pen-btn.active {
+    background: var(--pen-active-color, #1e293b);
+    border-color: var(--pen-active-color, #1e293b);
+    color: #fff;
+  }
+  button.action-btn {
+    flex: 1;
+  }
+  button.nav-btn {
+    flex: 0 0 auto;
+    min-width: 44px;
+    padding: 10px 12px;
+    font-size: 16px;
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  button.color-btn {
+    flex: 1;
+    min-height: 44px;
+    padding: 0;
+    border: 3px solid transparent;
+    background: var(--btn-color);
+    position: relative;
+  }
+  button.color-btn.active {
+    border-color: var(--fg);
+  }
+  button.reset-btn {
+    flex: 1;
+    font-size: 13px;
+    padding: 8px 6px;
+    border-left: 4px solid var(--btn-color);
+    position: relative;
+    overflow: hidden;
+  }
+  .reset-fill {
+    position: absolute;
+    inset: 0;
+    width: 0%;
+    background: var(--btn-color);
+    opacity: 0.35;
+    pointer-events: none;
+  }
+  button.reset-btn.pressing .reset-fill {
+    width: 100%;
+    transition: width 600ms linear;
+  }
+  .reset-label {
+    position: relative;
+  }
+  .pen-icon {
+    width: 18px;
+    height: 18px;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  #board-wrap {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+  canvas {
+    display: block;
+    touch-action: none;
+    background: #fff;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  @media (max-width: 380px) {
+    body { padding: 8px; }
+    .panel { padding: 8px; }
+    .row { gap: 6px; }
+    button { padding: 8px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <div class="row">
+    <button class="nav-btn" id="prevBtn" aria-label="前の問題">◀</button>
+    <label class="field-label" for="puzzleSelect">問題</label>
+    <select id="puzzleSelect"></select>
+    <button class="nav-btn" id="nextBtn" aria-label="次の問題">▶</button>
+  </div>
+  <div class="row" id="colorRow"></div>
+  <div class="row">
+    <button class="pen-btn" id="penLine" data-pen="line">
+      <svg class="pen-icon" viewBox="0 0 24 24"><line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+      線
+    </button>
+    <button class="pen-btn" id="penBlack" data-pen="black">
+      <svg class="pen-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" fill="currentColor"/></svg>
+      塗り
+    </button>
+    <button class="action-btn" id="undoBtn">元に戻す</button>
+    <button class="action-btn" id="redoBtn">やり直す</button>
+    <button class="reset-btn" id="resetBtn">
+      <span class="reset-fill"></span>
+      <span class="reset-label" id="resetLabel">リセット</span>
+    </button>
+  </div>
+</div>
+
+<div id="board-wrap">
+  <canvas id="board"></canvas>
+</div>
+
+<script src="puzzles_data.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  const CELL = 40;
+  const PAD = 24;
+  const DPR = Math.max(1, window.devicePixelRatio || 1);
+  const STORAGE_PREFIX = "yajilin-player:";
+
+  const PEN_COLORS = ["purple", "blue", "green", "yellow", "red"];
+  const COLOR_LABEL = { purple: "紫", blue: "青", green: "緑", yellow: "黄", red: "赤" };
+  const COLOR_HEX = {
+    purple: "#9333ea",
+    blue: "#2563eb",
+    green: "#16a34a",
+    yellow: "#ca8a04",
+    red: "#dc2626",
+  };
+
+  const COLORS = {
+    thinLine: "#cbd5e1",
+    border: "#000000",
+    clueFill: "#333333",
+    clueText: "#ffffff",
+    white: "#ffffff",
+  };
+  const DOT_RADIUS = CELL * 0.1;
+
+  const canvas = document.getElementById("board");
+  const ctx = canvas.getContext("2d");
+  const boardWrap = document.getElementById("board-wrap");
+  const puzzleSelect = document.getElementById("puzzleSelect");
+  const prevBtn = document.getElementById("prevBtn");
+  const nextBtn = document.getElementById("nextBtn");
+  const undoBtn = document.getElementById("undoBtn");
+  const redoBtn = document.getElementById("redoBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const resetLabel = document.getElementById("resetLabel");
+  const colorRow = document.getElementById("colorRow");
+  const penButtons = {
+    line: document.getElementById("penLine"),
+    black: document.getElementById("penBlack"),
+  };
+
+  // 色選択ボタンを動的生成
+  const colorButtons = {};
+  for (const color of PEN_COLORS) {
+    const btn = document.createElement("button");
+    btn.className = "color-btn";
+    btn.style.setProperty("--btn-color", COLOR_HEX[color]);
+    btn.setAttribute("aria-label", COLOR_LABEL[color]);
+    btn.dataset.color = color;
+    colorRow.appendChild(btn);
+    colorButtons[color] = btn;
+  }
+
+  let puzzle = null;
+  let currentIndex = 0;
+  let rows = 0, cols = 0;
+  let clueMap = new Map();    // "r,c" -> { dir, num }(所与の矢印付き数字マス。dir は "U"/"D"/"L"/"R"/"N"、num は整数か null="?")
+
+  let penMode = "line";
+  let penColor = "purple";
+  // 各マス/各辺は高々1色しか持てない(排他)。値は色名文字列。
+  // 種類間の衝突は koburin-player の黒塗り/線の規則に倣う:
+  // - 黒マスと点は同一マスに同時に存在しない(背反。koburin の黒塗りと薄塗りの関係と同じ)。相手方に何かあれば(同色でも)配置不可。
+  // - 線は黒マスの有無を問わず引ける(koburin と同じ。同色の黒マス上では線を白で描き直して見えるようにする)。
+  // - 点はタップでは線が通っていないマスにだけ打てる(線の色は問わない)。線を引いても点は消さない。
+  //   線を引くドラッグでは、なぞったマスにドラッグの色で点を打つ(他色の点は上書きしない)。
+  //   1回のジェスチャーが触れるのはペン選択色1色分だけ、という色ごとの履歴の前提を崩さないため。
+  const MARK_KINDS = ["blacks", "lines", "dots"];
+  let state = freshState();
+  // undo/redoは色ごとに独立した履歴を持つ(他色の操作履歴には影響しない)
+  let undoStacks = freshColorStacks();
+  let redoStacks = freshColorStacks();
+
+  function freshState() {
+    const s = {};
+    for (const kind of MARK_KINDS) s[kind] = new Map();
+    return s;
+  }
+
+  function freshColorStacks() {
+    const s = {};
+    for (const color of PEN_COLORS) s[color] = [];
+    return s;
+  }
+
+  // --- 座標ヘルパー ---
+
+  function cellKey(r, c) { return r + "," + c; }
+
+  function parseCellKey(key) {
+    return key.split(",").map(Number);
+  }
+
+  function edgeKey(r1, c1, r2, c2) {
+    // 常に (r1,c1) が辞書順で小さい側になるよう正規化する
+    if (r1 > r2 || (r1 === r2 && c1 > c2)) {
+      [r1, c1, r2, c2] = [r2, c2, r1, c1];
+    }
+    return r1 + "," + c1 + "-" + r2 + "," + c2;
+  }
+
+  function cellCenter(r, c) {
+    return [PAD + c * CELL + CELL / 2, PAD + r * CELL + CELL / 2];
+  }
+
+  function pixelToCell(x, y) {
+    const c = Math.floor((x - PAD) / CELL);
+    const r = Math.floor((y - PAD) / CELL);
+    if (r < 0 || r >= rows || c < 0 || c >= cols) return null;
+    return [r, c];
+  }
+
+  function boardPixelSize() {
+    return [cols * CELL + PAD * 2, rows * CELL + PAD * 2];
+  }
+
+  // そのマスに接する辺のどれかに線があるか(色は問わない)
+  function cellHasLine(r, c) {
+    for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      if (state.lines.has(edgeKey(r, c, r + dr, c + dc))) return true;
+    }
+    return false;
+  }
+
+  // --- 保存(問題ごとにlocalStorageへ) ---
+
+  function storageKey(puzzleId) {
+    return STORAGE_PREFIX + puzzleId;
+  }
+
+  const LAST_PUZZLE_KEY = STORAGE_PREFIX + "last-puzzle-id";
+
+  // プライベートブラウジング等でlocalStorageが使えない場合は諦める(失敗を握りつぶす)
+  function safeGetItem(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function safeSetItem(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      // 諦める
+    }
+  }
+
+  function saveLastPuzzleId(id) {
+    safeSetItem(LAST_PUZZLE_KEY, id);
+  }
+
+  function loadLastPuzzleIndex() {
+    const id = safeGetItem(LAST_PUZZLE_KEY);
+    if (!id) return 0;
+    const idx = PUZZLES.findIndex((p) => p.id === id);
+    return idx >= 0 ? idx : 0;
+  }
+
+  function saveState() {
+    const payload = { undoStacks, redoStacks };
+    for (const kind of MARK_KINDS) payload[kind] = [...state[kind].entries()];
+    safeSetItem(storageKey(puzzle.id), JSON.stringify(payload));
+  }
+
+  // 保存データのundo/redo履歴を検証しつつ復元する(壊れたデータ・旧バージョンの保存データは空履歴にフォールバック)
+  function normalizeColorStacks(raw) {
+    const stacks = freshColorStacks();
+    if (!raw || typeof raw !== "object") return stacks;
+    for (const color of PEN_COLORS) {
+      const list = raw[color];
+      if (!Array.isArray(list)) continue;
+      stacks[color] = list.filter(
+        (snap) => snap && MARK_KINDS.every((kind) => Array.isArray(snap[kind]))
+      );
+    }
+    return stacks;
+  }
+
+  function loadSavedState(puzzleId) {
+    const raw = safeGetItem(storageKey(puzzleId));
+    if (!raw) return { state: freshState(), undoStacks: freshColorStacks(), redoStacks: freshColorStacks() };
+    try {
+      const parsed = JSON.parse(raw);
+      const restored = freshState();
+      for (const kind of MARK_KINDS) restored[kind] = new Map(parsed[kind] || []);
+      return {
+        state: restored,
+        undoStacks: normalizeColorStacks(parsed.undoStacks),
+        redoStacks: normalizeColorStacks(parsed.redoStacks),
+      };
+    } catch (e) {
+      return { state: freshState(), undoStacks: freshColorStacks(), redoStacks: freshColorStacks() };
+    }
+  }
+
+  // --- 問題ロード ---
+
+  function loadPuzzle(idx) {
+    currentIndex = idx;
+    puzzle = PUZZLES[idx];
+    rows = puzzle.rows;
+    cols = puzzle.cols;
+
+    clueMap = new Map(puzzle.clues.map(([r, c, dir, num]) => [cellKey(r, c), { dir, num }]));
+
+    const saved = loadSavedState(puzzle.id);
+    state = saved.state;
+    undoStacks = saved.undoStacks;
+    redoStacks = saved.redoStacks;
+    updateUndoRedoState();
+    saveLastPuzzleId(puzzle.id);
+    puzzleSelect.value = String(idx);
+    resizeCanvas();
+  }
+
+  // --- 描画 ---
+
+  function resizeCanvas() {
+    const [w, h] = boardPixelSize();
+
+    // スクロールを禁止しているため、利用可能な幅・高さを絶対に超えないよう合わせて拡大縮小する
+    const availW = boardWrap.clientWidth;
+    const availH = window.innerHeight - boardWrap.getBoundingClientRect().top - 16;
+    const scale = Math.min(availW / w, Math.max(availH, 1) / h);
+
+    const pixelRatio = DPR * scale;
+    canvas.width = Math.round(w * pixelRatio);
+    canvas.height = Math.round(h * pixelRatio);
+    canvas.style.width = (w * scale) + "px";
+    canvas.style.height = (h * scale) + "px";
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    draw();
+  }
+
+  // 矢印(軸+三角の矢じり)を (cx, cy) を中心に dir の向きで描く。len は全長。
+  function drawArrow(cx, cy, dir, len) {
+    const angle = { U: -Math.PI / 2, D: Math.PI / 2, L: Math.PI, R: 0 }[dir];
+    const half = len / 2;
+    const head = len * 0.45;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.lineWidth = 2;
+    ctx.lineCap = "butt";
+    ctx.beginPath();
+    ctx.moveTo(-half, 0);
+    ctx.lineTo(half - head * 0.6, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(half, 0);
+    ctx.lineTo(half - head, -head * 0.55);
+    ctx.lineTo(half - head, head * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    const [w, h] = boardPixelSize();
+    ctx.clearRect(0, 0, w, h);
+
+    // 1. プレイヤーの黒マス(選択色で塗りつぶし)
+    for (const [key, color] of state.blacks) {
+      const [r, c] = parseCellKey(key);
+      ctx.fillStyle = COLOR_HEX[color];
+      ctx.fillRect(PAD + c * CELL, PAD + r * CELL, CELL, CELL);
+    }
+
+    // 2. 所与の数字マスの塗り(格子線が上に見えるよう線より先に描く)
+    ctx.fillStyle = COLORS.clueFill;
+    for (const key of clueMap.keys()) {
+      const [r, c] = parseCellKey(key);
+      ctx.fillRect(PAD + c * CELL, PAD + r * CELL, CELL, CELL);
+    }
+
+    // 3. 細いグリッド線(全マス境界)
+    ctx.strokeStyle = COLORS.thinLine;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let r = 0; r <= rows; r++) {
+      ctx.moveTo(PAD, PAD + r * CELL);
+      ctx.lineTo(PAD + cols * CELL, PAD + r * CELL);
+    }
+    for (let c = 0; c <= cols; c++) {
+      ctx.moveTo(PAD + c * CELL, PAD);
+      ctx.lineTo(PAD + c * CELL, PAD + rows * CELL);
+    }
+    ctx.stroke();
+
+    // 4. 外周
+    ctx.strokeStyle = COLORS.border;
+    ctx.lineWidth = 4;
+    ctx.lineJoin = "miter";
+    ctx.strokeRect(PAD, PAD, cols * CELL, rows * CELL);
+
+    // 5. プレイヤーの線
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    for (const [key, color] of state.lines) {
+      const [a, b] = key.split("-");
+      const [r1, c1] = parseCellKey(a);
+      const [r2, c2] = parseCellKey(b);
+      const [x1, y1] = cellCenter(r1, c1);
+      const [x2, y2] = cellCenter(r2, c2);
+      ctx.strokeStyle = COLOR_HEX[color];
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      // 同色の黒マス上では線が背景に溶けて見えなくなるため、そのマス内の部分だけ白で描き直す。
+      for (const [r, c] of [[r1, c1], [r2, c2]]) {
+        if (state.blacks.get(cellKey(r, c)) !== color) continue;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(PAD + c * CELL, PAD + r * CELL, CELL, CELL);
+        ctx.clip();
+        ctx.strokeStyle = COLORS.white;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // 6. プレイヤーの点(黒マスとは背反なので、塗りの上に乗ることはない)
+    for (const [key, color] of state.dots) {
+      const [r, c] = parseCellKey(key);
+      const [cx, cy] = cellCenter(r, c);
+      ctx.fillStyle = COLOR_HEX[color];
+      ctx.beginPath();
+      ctx.arc(cx, cy, DOT_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 7. 所与の数字と矢印。矢印は上下向きなら数字の左、左右向きなら数字の上に小さく置く(数字と重ならないよう数字を反対側へずらす)。
+    ctx.fillStyle = COLORS.clueText;
+    ctx.strokeStyle = COLORS.clueText;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const arrowLen = CELL * 0.4;
+    for (const [key, { dir, num }] of clueMap) {
+      const [r, c] = parseCellKey(key);
+      const [cx, cy] = cellCenter(r, c);
+      const text = num === null ? "?" : String(num);
+      let tx = cx, ty = cy;
+      let fontSize = CELL * 0.6;
+      if (dir === "U" || dir === "D") {
+        drawArrow(cx - CELL * 0.28, cy, dir, arrowLen);
+        tx = cx + CELL * 0.1;
+        fontSize = CELL * 0.5;
+      } else if (dir === "L" || dir === "R") {
+        drawArrow(cx, cy - CELL * 0.28, dir, arrowLen);
+        ty = cy + CELL * 0.1;
+        fontSize = CELL * 0.5;
+      }
+      // 2桁以上の数字は矢印やマス境界にはみ出さないよう縮める
+      if (text.length >= 2) fontSize *= 0.8;
+      ctx.font = "bold " + Math.round(fontSize) + "px -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
+      ctx.fillText(text, tx, ty + 1);
+    }
+  }
+
+  // --- Undo/Redo管理(色ごとに独立した履歴) ---
+  // 1回のジェスチャーや色別リセットは常にペン選択色1色分のマスにしか触れないため、
+  // その色が持つマス/辺のキー集合だけを記録すれば他色への影響なく復元できる。
+
+  function colorKeys(map, color) {
+    const keys = [];
+    for (const [k, v] of map) {
+      if (v === color) keys.push(k);
+    }
+    return keys;
+  }
+
+  function colorSnapshot(color) {
+    const snap = {};
+    for (const kind of MARK_KINDS) snap[kind] = colorKeys(state[kind], color);
+    return snap;
+  }
+
+  function keysEqual(a, b) {
+    if (a.length !== b.length) return false;
+    const setB = new Set(b);
+    return a.every((k) => setB.has(k));
+  }
+
+  function colorSnapshotsEqual(a, b) {
+    return MARK_KINDS.every((kind) => keysEqual(a[kind], b[kind]));
+  }
+
+  function removeColorFromMap(map, color) {
+    let changed = false;
+    for (const [k, v] of map) {
+      if (v === color) {
+        map.delete(k);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  function applyColorSnapshot(color, snap) {
+    for (const kind of MARK_KINDS) {
+      removeColorFromMap(state[kind], color);
+      for (const k of snap[kind]) state[kind].set(k, color);
+    }
+  }
+
+  function updateUndoRedoState() {
+    undoBtn.disabled = undoStacks[penColor].length === 0;
+    redoBtn.disabled = redoStacks[penColor].length === 0;
+  }
+
+  function commitChange() {
+    updateUndoRedoState();
+    saveState();
+    draw();
+  }
+
+  function recordColorChange(color, before) {
+    const after = colorSnapshot(color);
+    if (colorSnapshotsEqual(before, after)) return false;
+    undoStacks[color].push(before);
+    redoStacks[color] = [];
+    updateUndoRedoState();
+    return true;
+  }
+
+  // 指定色を1操作ぶんだけ取り消す/やり直す。resetの一括取り消しからも共有で使う。
+  function performUndo(color) {
+    const stack = undoStacks[color];
+    if (stack.length === 0) return false;
+    const prev = stack.pop();
+    redoStacks[color].push(colorSnapshot(color));
+    applyColorSnapshot(color, prev);
+    return true;
+  }
+
+  function performRedo(color) {
+    const stack = redoStacks[color];
+    if (stack.length === 0) return false;
+    const next = stack.pop();
+    undoStacks[color].push(colorSnapshot(color));
+    applyColorSnapshot(color, next);
+    return true;
+  }
+
+  undoBtn.addEventListener("click", () => {
+    if (!performUndo(penColor)) return;
+    commitChange();
+  });
+
+  redoBtn.addEventListener("click", () => {
+    if (!performRedo(penColor)) return;
+    commitChange();
+  });
+
+  // リセットは常に「現在選択中のペン色」のマスを消す。誤操作防止のため長押しでのみ発火する。
+  function performReset() {
+    const color = penColor;
+    let changed = false;
+
+    // 記録済みの操作を1つずつ取り消していく。resetを連続undoと同じ扱いにすることで、
+    // reset後のredoが最も古い操作から1つずつ順番に復元されるようにする。
+    while (performUndo(color)) changed = true;
+
+    // undo履歴が及ばない残り(保存データから復元されたぶん等)があれば最後にまとめて消す
+    const remaining = colorSnapshot(color);
+    if (MARK_KINDS.some((kind) => remaining[kind].length)) {
+      for (const kind of MARK_KINDS) removeColorFromMap(state[kind], color);
+      undoStacks[color].push(remaining);
+      changed = true;
+    }
+
+    if (!changed) return;
+    commitChange();
+  }
+
+  const RESET_LONGPRESS_MS = 600; // .reset-fillのtransition時間と合わせる
+  let resetPressTimer = null;
+
+  function cancelResetPress() {
+    if (resetPressTimer) {
+      clearTimeout(resetPressTimer);
+      resetPressTimer = null;
+    }
+    resetBtn.classList.remove("pressing");
+  }
+
+  resetBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    resetBtn.classList.add("pressing");
+    resetPressTimer = setTimeout(() => {
+      resetPressTimer = null;
+      resetBtn.classList.remove("pressing");
+      performReset();
+    }, RESET_LONGPRESS_MS);
+  });
+  resetBtn.addEventListener("pointerup", cancelResetPress);
+  resetBtn.addEventListener("pointerleave", cancelResetPress);
+  resetBtn.addEventListener("pointercancel", cancelResetPress);
+
+  // --- ペン・色の切り替え ---
+
+  function setPenMode(mode) {
+    penMode = mode;
+    for (const key in penButtons) {
+      penButtons[key].classList.toggle("active", key === mode);
+    }
+  }
+
+  function setPenColor(color) {
+    penColor = color;
+    for (const key of PEN_COLORS) {
+      colorButtons[key].classList.toggle("active", key === color);
+    }
+    for (const key in penButtons) {
+      penButtons[key].style.setProperty("--pen-active-color", COLOR_HEX[color]);
+    }
+    resetBtn.style.setProperty("--btn-color", COLOR_HEX[color]);
+    resetLabel.textContent = COLOR_LABEL[color] + "を消す";
+    updateUndoRedoState();
+  }
+
+  for (const key in penButtons) {
+    penButtons[key].addEventListener("click", () => setPenMode(key));
+  }
+  for (const color of PEN_COLORS) {
+    colorButtons[color].addEventListener("click", () => setPenColor(color));
+  }
+
+  // --- 入力処理(ポインタイベントでマウス/タッチ共通対応) ---
+
+  let dragging = false;
+  let gestureColor = null; // このドラッグで使う色(押した時点で固定。ドラッグ中に色ボタンを押されても変えない)
+  let gesturePen = null; // このドラッグで使うペン(同上)
+  let gestureBefore = null;
+  let gestureTouched = new Set();
+  let lastCell = null;
+  let lastPos = null; // 直前のポインタ位置(盤面座標)。速いドラッグで飛ばしたマスを補うのに使う
+  let gestureStartCell = null;
+  let gestureMoved = false; // 線ペンで押したマスから別のマスへ移ったか(移らなければタップ=点の操作とみなす)
+  let gestureLineAdd = null; // このドラッグ全体が「線を引く」か「消す」か(最初になぞった辺で決まる。null=未決定)
+  let gestureCellAdd = null; // このドラッグ全体が「塗る」か「消す」か(最初になぞったマスで決まる。null=未決定)
+  let gestureLineCells = []; // 線ペンでなぞったマス(始点を含む)。「引く」と決まった時点で、それまでのマスにも点を打つため
+
+  function eventToCanvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const [w, h] = boardPixelSize();
+    const scaleX = w / rect.width;
+    const scaleY = h / rect.height;
+    return [(e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY];
+  }
+
+  // 塗りペンの1マス分の処理。黒マスと点は背反なので、点があれば(同色でも)塗れない。
+  function handleBlackAt(cell) {
+    const key = cellKey(cell[0], cell[1]);
+    if (gestureTouched.has(key)) return;
+    gestureTouched.add(key);
+
+    // 最初になぞったマスの状態(自分の色が置かれているか)で、このドラッグ全体の動作を固定する。
+    // 1マスずつトグルすると、ドラッグ中に既存のマスを踏んだ瞬間に意図せず消えてしまうため。
+    if (gestureCellAdd === null) {
+      gestureCellAdd = state.blacks.get(key) !== gestureColor;
+    }
+    if (gestureCellAdd) {
+      // 所与の数字マスは塗りの対象外
+      if (state.blacks.get(key) === undefined && !clueMap.has(key) && !state.dots.has(key)) {
+        state.blacks.set(key, gestureColor);
+      }
+    } else if (state.blacks.get(key) === gestureColor) {
+      state.blacks.delete(key);
+    }
+  }
+
+  // 線ペンのタップ。線が通っていないマスなら点をトグルする(他色の点があれば何もしない=排他)。
+  function handleDotTap(cell) {
+    const key = cellKey(cell[0], cell[1]);
+    if (clueMap.has(key)) return;
+    if (cellHasLine(cell[0], cell[1])) return;
+    const existing = state.dots.get(key);
+    if (existing === gestureColor) {
+      state.dots.delete(key);
+    } else if (existing === undefined && !state.blacks.has(key)) {
+      state.dots.set(key, gestureColor);
+    }
+  }
+
+  // 線を引くドラッグでなぞったマスに点を打つ。黒マスとは背反、他色の点は上書きしない(1マス1色)。
+  function placeTraceDot(cell) {
+    const key = cellKey(cell[0], cell[1]);
+    if (clueMap.has(key) || state.blacks.has(key) || state.dots.has(key)) return;
+    state.dots.set(key, gestureColor);
+  }
+
+  // 線ペンのドラッグでマスをなぞったときに記録する。「引く」が決まっていれば即座に点を打つ。
+  function traceLineCell(cell) {
+    gestureLineCells.push(cell);
+    if (gestureLineAdd === true) placeTraceDot(cell);
+  }
+
+  function handleLineStep(prevCell, curCell) {
+    const dr = curCell[0] - prevCell[0];
+    const dc = curCell[1] - prevCell[1];
+    if (Math.abs(dr) + Math.abs(dc) !== 1) return; // 隣接マスのみ線を引ける
+    // 数字マスには線が入らないため、数字マスを端点とする線は引けない
+    if (clueMap.has(cellKey(prevCell[0], prevCell[1])) || clueMap.has(cellKey(curCell[0], curCell[1]))) return;
+    const key = edgeKey(prevCell[0], prevCell[1], curCell[0], curCell[1]);
+    if (gestureTouched.has(key)) return;
+    gestureTouched.add(key);
+
+    // 最初になぞった辺の状態(自分の色の線があるか)で、このドラッグ全体の動作を固定する。
+    // 1本ずつトグルすると、ドラッグ中に既存の線を踏んだ瞬間に意図せず消えてしまうため。
+    if (gestureLineAdd === null) {
+      gestureLineAdd = state.lines.get(key) !== gestureColor;
+      // 動作が決まる前になぞったマス(始点や数字マス越しに通ったマス)にも、引くと決まった時点で点を打つ
+      if (gestureLineAdd) {
+        for (const cell of gestureLineCells) placeTraceDot(cell);
+      }
+    }
+    if (gestureLineAdd) {
+      if (state.lines.get(key) === undefined) {
+        state.lines.set(key, gestureColor);
+      }
+    } else if (state.lines.get(key) === gestureColor) {
+      state.lines.delete(key);
+    }
+  }
+
+  // ドラッグで新しいマスに入ったときの処理(ペンごとに振り分け)
+  function handleEnterCell(cell) {
+    if (gesturePen === "black") {
+      handleBlackAt(cell);
+      lastCell = cell;
+      return;
+    }
+    gestureMoved = true;
+    // マスの角をかすめて斜めに移った場合は、間の1マスを経由して2辺として扱う
+    if (Math.abs(cell[0] - lastCell[0]) === 1 && Math.abs(cell[1] - lastCell[1]) === 1) {
+      const mid = [lastCell[0], cell[1]];
+      traceLineCell(mid);
+      handleLineStep(lastCell, mid);
+      traceLineCell(cell);
+      handleLineStep(mid, cell);
+    } else {
+      traceLineCell(cell);
+      handleLineStep(lastCell, cell);
+    }
+    lastCell = cell;
+  }
+
+  function onPointerDown(e) {
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    const [x, y] = eventToCanvasPos(e);
+    const cell = pixelToCell(x, y);
+    if (!cell) return;
+
+    dragging = true;
+    gestureColor = penColor;
+    gesturePen = penMode;
+    gestureBefore = colorSnapshot(gestureColor);
+    gestureTouched = new Set();
+    lastCell = cell;
+    lastPos = [x, y];
+    gestureStartCell = cell;
+    gestureMoved = false;
+    gestureLineAdd = null;
+    gestureCellAdd = null;
+    // 始点はなぞったマスに含める(点を打つのは「引く」と決まってから)
+    gestureLineCells = gesturePen === "line" ? [cell] : [];
+
+    if (gesturePen === "black") {
+      handleBlackAt(cell);
+      draw();
+    }
+  }
+
+  function onPointerMove(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    const [x, y] = eventToCanvasPos(e);
+    const [px, py] = lastPos;
+    lastPos = [x, y];
+
+    // 速いドラッグでは1回のイベントで複数マスを飛び越えるため、直前位置からの線分を
+    // 細かく刻んで、指が通ったマスを順になぞる(マスが小さい大盤面で辺・マスの取りこぼしを防ぐ)
+    const dist = Math.hypot(x - px, y - py);
+    const steps = Math.max(1, Math.ceil(dist / (CELL / 4)));
+    let changed = false;
+    for (let i = 1; i <= steps; i++) {
+      const cell = pixelToCell(px + (x - px) * i / steps, py + (y - py) * i / steps);
+      if (!cell) continue; // 盤外は無視し、直前のマスを保持する
+      if (cell[0] === lastCell[0] && cell[1] === lastCell[1]) continue;
+      handleEnterCell(cell);
+      changed = true;
+    }
+    if (changed) draw();
+  }
+
+  function onPointerUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    // 線ペンで別のマスへ移らずに離した場合はタップとみなし、点を打つ/消す
+    if (gesturePen === "line" && !gestureMoved && gestureStartCell) {
+      handleDotTap(gestureStartCell);
+      draw();
+    }
+    if (gestureBefore && gestureColor && recordColorChange(gestureColor, gestureBefore)) {
+      saveState();
+    }
+    gestureBefore = null;
+    gestureColor = null;
+    gesturePen = null;
+    lastCell = null;
+    lastPos = null;
+    gestureStartCell = null;
+    gestureLineCells = [];
+  }
+
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+
+  window.addEventListener("resize", () => {
+    if (puzzle) resizeCanvas();
+  });
+
+  // --- 問題セレクトの初期化 ---
+
+  function labelFor(id) {
+    // 例: "001_yajilin_10x10" -> "001"
+    const m = id.match(/^(\d+)_/);
+    return m ? m[1] : id;
+  }
+
+  PUZZLES.forEach((p, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = labelFor(p.id) + "  (" + p.id + ")";
+    puzzleSelect.appendChild(opt);
+  });
+
+  puzzleSelect.addEventListener("change", () => {
+    loadPuzzle(Number(puzzleSelect.value));
+  });
+
+  prevBtn.addEventListener("click", () => {
+    loadPuzzle((currentIndex - 1 + PUZZLES.length) % PUZZLES.length);
+  });
+
+  nextBtn.addEventListener("click", () => {
+    loadPuzzle((currentIndex + 1) % PUZZLES.length);
+  });
+
+  setPenMode("line");
+  setPenColor("purple");
+  loadPuzzle(loadLastPuzzleIndex());
+})();
+</script>
+
+</body>
+</html>
