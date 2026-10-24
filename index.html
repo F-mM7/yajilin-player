@@ -277,7 +277,7 @@
   //   (塗りマスを端点に含む線は引けず、線や点のあるマスは塗れない)
   // - 点は点ペンで打つ/消す。線を引くドラッグでは、なぞったマスにドラッグの色で点を打つ(他色の点は上書きしない)。
   // - 線を消すと、その線の端のマスに同色の線が残らなくなった場合、そのマスの同色の点も消す。
-  // - 線ペンのタップは、そのマスに接する同色の線とそのマスの同色の点を消す。
+  // - 線ペンのタップは、そのマスに同色の線も点もなければ点を打ち(点ペンと同じ条件)、あれば接する同色の線とそのマスの同色の点を消す。
   // 1回のジェスチャーが触れるのはペン選択色1色分だけ、という色ごとの履歴の前提を崩さないため、他色の印には触れない。
   const MARK_KINDS = ["blacks", "lines", "dots"];
   let state = freshState();
@@ -773,7 +773,7 @@
   let lastCell = null;
   let lastPos = null; // 直前のポインタ位置(盤面座標)。速いドラッグで飛ばしたマスを補うのに使う
   let gestureStartCell = null;
-  let gestureMoved = false; // 線ペンで押したマスから別のマスへ移ったか(移らなければタップ=線・点の消去とみなす)
+  let gestureMoved = false; // 線ペンで押したマスから別のマスへ移ったか(移らなければタップ=点を打つ/線・点の消去とみなす)
   let gestureLineAdd = null; // このドラッグ全体が「線を引く」か「消す」か(最初になぞった辺で決まる。null=未決定)
   let gestureCellAdd = null; // 塗り/点ペンのドラッグ全体が「置く」か「消す」か(最初になぞったマスで決まる。null=未決定)
   let gestureLineCells = []; // 線ペンでなぞったマス(始点を含む)。「引く」と決まった時点で、それまでのマスにも点を打つため
@@ -826,9 +826,14 @@
     }
   }
 
-  // 線ペンのタップ。そのマスに接する同色の線と、そのマスの同色の点を消す(線の反対側のマスの点は線消去の規則に従う)。
+  // 線ペンのタップ。そのマスに同色の線も点もなければ点を打つ(置ける条件は点ペンと同じ)。
+  // あれば、そのマスに接する同色の線と、そのマスの同色の点を消す(線の反対側のマスの点は線消去の規則に従う)。
   function handleLineTap(cell) {
     const [r, c] = cell;
+    if (!cellHasColorLine(r, c, gestureColor) && state.dots.get(cellKey(r, c)) !== gestureColor) {
+      handleDotAt(cell);
+      return;
+    }
     for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
       if (state.lines.get(edgeKey(r, c, r + dr, c + dc)) === gestureColor) {
         removeLineAndOrphanDots(r, c, r + dr, c + dc, gestureColor);
@@ -961,7 +966,7 @@
   function onPointerUp(e) {
     if (!dragging) return;
     dragging = false;
-    // 線ペンで別のマスへ移らずに離した場合はタップとみなし、そのマスの線・点を消す
+    // 線ペンで別のマスへ移らずに離した場合はタップとみなし、線・点がなければ点を打ち、あれば消す
     if (gesturePen === "line" && !gestureMoved && gestureStartCell) {
       handleLineTap(gestureStartCell);
       draw();
