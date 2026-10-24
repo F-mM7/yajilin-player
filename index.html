@@ -185,13 +185,13 @@
       <svg class="pen-icon" viewBox="0 0 24 24"><line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
       線
     </button>
-    <button class="pen-btn" id="penBlack" data-pen="black">
-      <svg class="pen-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" fill="currentColor"/></svg>
-      塗り
-    </button>
     <button class="pen-btn" id="penDot" data-pen="dot">
       <svg class="pen-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
       点
+    </button>
+    <button class="pen-btn" id="penBlack" data-pen="black">
+      <svg class="pen-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" fill="currentColor"/></svg>
+      塗り
     </button>
     <button class="action-btn" id="undoBtn">元に戻す</button>
     <button class="action-btn" id="redoBtn">やり直す</button>
@@ -248,8 +248,8 @@
   const colorRow = document.getElementById("colorRow");
   const penButtons = {
     line: document.getElementById("penLine"),
-    black: document.getElementById("penBlack"),
     dot: document.getElementById("penDot"),
+    black: document.getElementById("penBlack"),
   };
 
   // 色選択ボタンを動的生成
