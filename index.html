@@ -144,6 +144,14 @@
   .reset-label {
     position: relative;
   }
+  .save-error {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #f87171;
+  }
+  .save-error[hidden] {
+    display: none;
+  }
   .pen-icon {
     width: 18px;
     height: 18px;
@@ -200,6 +208,7 @@
       <span class="reset-label" id="resetLabel">リセット</span>
     </button>
   </div>
+  <div class="save-error" id="saveError" role="alert" hidden></div>
 </div>
 
 <div id="board-wrap">
@@ -246,6 +255,7 @@
   const resetBtn = document.getElementById("resetBtn");
   const resetLabel = document.getElementById("resetLabel");
   const colorRow = document.getElementById("colorRow");
+  const saveError = document.getElementById("saveError");
   const penButtons = {
     line: document.getElementById("penLine"),
     dot: document.getElementById("penDot"),
@@ -389,10 +399,157 @@
     return idx >= 0 ? idx : 0;
   }
 
-  function saveState() {
-    const payload = { undoStacks, redoStacks };
+  // 容量超過の例外か(ブラウザによって名前・コードが異なる)
+  function isQuotaError(e) {
+    if (!e) return false;
+    return (
+      e.name === "QuotaExceededError" ||
+      e.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+      e.code === 22 ||
+      e.code === 1014
+    );
+  }
+
+  // 書き込みを試し、結果を "ok" / "quota" / "error" で返す(容量超過とそれ以外を区別するため)
+  function trySetItem(key, value) {
+    try {
+      localStorage.setItem(key, value);
+      return "ok";
+    } catch (e) {
+      if (isQuotaError(e)) return "quota";
+      console.warn("[yajilin-player] 保存に失敗しました(容量超過以外):", e);
+      return "error";
+    }
+  }
+
+  function serializeCurrentState() {
+    const payload = { savedAt: Date.now(), undoStacks, redoStacks };
     for (const kind of MARK_KINDS) payload[kind] = [...state[kind].entries()];
-    safeSetItem(storageKey(puzzle.id), JSON.stringify(payload));
+    return JSON.stringify(payload);
+  }
+
+  function showSaveError(result) {
+    const failed = result !== "ok";
+    if (failed) {
+      saveError.textContent =
+        (result === "quota" ? "ブラウザの保存容量が足りず、保存できませんでした。" : "保存できませんでした。") +
+        "このままページを閉じると、最後に保存できたところより後の入力は失われます。";
+    }
+    if (saveError.hidden === !failed) return;
+    saveError.hidden = !failed;
+    resizeCanvas(); // 表示の有無で盤面に使える高さが変わる
+  }
+
+  function hasStoredHistory(parsed) {
+    for (const name of ["undoStacks", "redoStacks"]) {
+      const stacks = parsed[name];
+      if (!stacks || typeof stacks !== "object") continue;
+      for (const color of PEN_COLORS) {
+        if (Array.isArray(stacks[color]) && stacks[color].length) return true;
+      }
+    }
+    return false;
+  }
+
+  // 遊んでいる問題以外で、履歴が残っていて最後に保存した日時がもっとも古い問題の保存データを探す。
+  // 日時のない(旧形式の)データはもっとも古いものとして扱う。対象はこのプレイヤーの問題データのキーに限る。
+  function findOldestOtherWithHistory(skipKeys) {
+    const currentKey = storageKey(puzzle.id);
+    let oldest = null;
+    for (const p of PUZZLES) {
+      const key = storageKey(p.id);
+      if (key === currentKey || skipKeys.has(key)) continue;
+      const raw = safeGetItem(key);
+      if (!raw) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (e) {
+        continue;
+      }
+      if (!parsed || typeof parsed !== "object" || !hasStoredHistory(parsed)) continue;
+      const savedAt = typeof parsed.savedAt === "number" ? parsed.savedAt : 0;
+      if (!oldest || savedAt < oldest.savedAt) oldest = { key, parsed, savedAt };
+    }
+    return oldest;
+  }
+
+  // 遊んでいる問題の元に戻す履歴を1件捨てる。色ごとの履歴には色をまたいだ時刻がないため、
+  // 履歴がもっとも長い色の、もっとも古い1件(スタックの底)を捨てる。
+  function dropOldestCurrentUndo() {
+    let target = null;
+    for (const color of PEN_COLORS) {
+      if (undoStacks[color].length && (!target || undoStacks[color].length > undoStacks[target].length)) {
+        target = color;
+      }
+    }
+    if (!target) return false;
+    undoStacks[target].shift();
+    return true;
+  }
+
+  // 元に戻す履歴が尽きたら、やり直す履歴をもっとも先の側(スタックの底)から捨てる
+  function dropFarthestCurrentRedo() {
+    let target = null;
+    for (const color of PEN_COLORS) {
+      if (redoStacks[color].length && (!target || redoStacks[color].length > redoStacks[target].length)) {
+        target = color;
+      }
+    }
+    if (!target) return false;
+    redoStacks[target].shift();
+    return true;
+  }
+
+  // 盤面を保存する。容量超過のときは、古い履歴から消して保存できるまで再試行する:
+  // (1) ほかの問題の履歴を、最後に保存した日時が古い問題から1問ずつ消す(盤面は残す)
+  // (2) 遊んでいる問題の元に戻す履歴を古いものから捨てる(メモリ上の履歴も同じにそろえる)
+  // (3) それでも足りなければ、遊んでいる問題のやり直す履歴も捨てる
+  // 履歴をすべて消しても保存できなければ、画面に知らせる。
+  function saveState() {
+    const key = storageKey(puzzle.id);
+    let result = trySetItem(key, serializeCurrentState());
+
+    const strippedKeys = new Set();
+    while (result === "quota") {
+      const victim = findOldestOtherWithHistory(strippedKeys);
+      if (!victim) break;
+      strippedKeys.add(victim.key);
+      victim.parsed.undoStacks = freshColorStacks();
+      victim.parsed.redoStacks = freshColorStacks();
+      const stripResult = trySetItem(victim.key, JSON.stringify(victim.parsed));
+      console.info(
+        "[yajilin-player] 容量超過のため、ほかの問題の履歴を消しました:",
+        victim.key,
+        "savedAt=" + victim.savedAt,
+        "result=" + stripResult
+      );
+      result = trySetItem(key, serializeCurrentState());
+    }
+
+    let droppedUndo = 0;
+    while (result === "quota" && dropOldestCurrentUndo()) {
+      droppedUndo++;
+      result = trySetItem(key, serializeCurrentState());
+    }
+    let droppedRedo = 0;
+    while (result === "quota" && dropFarthestCurrentRedo()) {
+      droppedRedo++;
+      result = trySetItem(key, serializeCurrentState());
+    }
+    if (droppedUndo || droppedRedo) {
+      console.info(
+        "[yajilin-player] 容量超過のため、遊んでいる問題の古い履歴を捨てました:",
+        "undo=" + droppedUndo,
+        "redo=" + droppedRedo
+      );
+      updateUndoRedoState();
+    }
+
+    if (result === "quota") {
+      console.warn("[yajilin-player] 履歴をすべて消しても容量が足りず、盤面を保存できませんでした");
+    }
+    showSaveError(result);
   }
 
   // 保存データのundo/redo履歴を検証しつつ復元する(壊れたデータ・旧バージョンの保存データは空履歴にフォールバック)
