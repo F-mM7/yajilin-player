@@ -189,6 +189,10 @@
       <svg class="pen-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" fill="currentColor"/></svg>
       塗り
     </button>
+    <button class="pen-btn" id="penDot" data-pen="dot">
+      <svg class="pen-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
+      点
+    </button>
     <button class="action-btn" id="undoBtn">元に戻す</button>
     <button class="action-btn" id="redoBtn">やり直す</button>
     <button class="reset-btn" id="resetBtn">
@@ -245,6 +249,7 @@
   const penButtons = {
     line: document.getElementById("penLine"),
     black: document.getElementById("penBlack"),
+    dot: document.getElementById("penDot"),
   };
 
   // 色選択ボタンを動的生成
@@ -267,12 +272,13 @@
   let penMode = "line";
   let penColor = "purple";
   // 各マス/各辺は高々1色しか持てない(排他)。値は色名文字列。
-  // 種類間の衝突は koburin-player の黒塗り/線の規則に倣う:
-  // - 黒マスと点は同一マスに同時に存在しない(背反。koburin の黒塗りと薄塗りの関係と同じ)。相手方に何かあれば(同色でも)配置不可。
-  // - 線は黒マスの有無を問わず引ける(koburin と同じ。同色の黒マス上では線を白で描き直して見えるようにする)。
-  // - 点はタップでは線が通っていないマスにだけ打てる(線の色は問わない)。線を引いても点は消さない。
-  //   線を引くドラッグでは、なぞったマスにドラッグの色で点を打つ(他色の点は上書きしない)。
-  //   1回のジェスチャーが触れるのはペン選択色1色分だけ、という色ごとの履歴の前提を崩さないため。
+  // 種類間の衝突:
+  // - 黒マスと点・線は同一マスに同時に存在しない(背反)。相手方に何かあれば(同色でも)配置不可。
+  //   (塗りマスを端点に含む線は引けず、線や点のあるマスは塗れない)
+  // - 点は点ペンで打つ/消す。線を引くドラッグでは、なぞったマスにドラッグの色で点を打つ(他色の点は上書きしない)。
+  // - 線を消すと、その線の端のマスに同色の線が残らなくなった場合、そのマスの同色の点も消す。
+  // - 線ペンのタップは、そのマスに接する同色の線とそのマスの同色の点を消す。
+  // 1回のジェスチャーが触れるのはペン選択色1色分だけ、という色ごとの履歴の前提を崩さないため、他色の印には触れない。
   const MARK_KINDS = ["blacks", "lines", "dots"];
   let state = freshState();
   // undo/redoは色ごとに独立した履歴を持つ(他色の操作履歴には影響しない)
@@ -328,6 +334,23 @@
       if (state.lines.has(edgeKey(r, c, r + dr, c + dc))) return true;
     }
     return false;
+  }
+
+  // そのマスに接する辺のどれかに指定色の線があるか
+  function cellHasColorLine(r, c, color) {
+    for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      if (state.lines.get(edgeKey(r, c, r + dr, c + dc)) === color) return true;
+    }
+    return false;
+  }
+
+  // 線を1本消し、端のマスに同色の線が残らなければそのマスの同色の点も消す
+  function removeLineAndOrphanDots(r1, c1, r2, c2, color) {
+    state.lines.delete(edgeKey(r1, c1, r2, c2));
+    for (const [r, c] of [[r1, c1], [r2, c2]]) {
+      const key = cellKey(r, c);
+      if (state.dots.get(key) === color && !cellHasColorLine(r, c, color)) state.dots.delete(key);
+    }
   }
 
   // --- 保存(問題ごとにlocalStorageへ) ---
@@ -533,7 +556,7 @@
       }
     }
 
-    // 6. プレイヤーの点(黒マスとは背反なので、塗りの上に乗ることはない)
+    // 6. プレイヤーの点(黒マスとは背反なので、通常は塗りの上に乗ることはない)
     for (const [key, color] of state.dots) {
       const [r, c] = parseCellKey(key);
       const [cx, cy] = cellCenter(r, c);
@@ -750,9 +773,9 @@
   let lastCell = null;
   let lastPos = null; // 直前のポインタ位置(盤面座標)。速いドラッグで飛ばしたマスを補うのに使う
   let gestureStartCell = null;
-  let gestureMoved = false; // 線ペンで押したマスから別のマスへ移ったか(移らなければタップ=点の操作とみなす)
+  let gestureMoved = false; // 線ペンで押したマスから別のマスへ移ったか(移らなければタップ=線・点の消去とみなす)
   let gestureLineAdd = null; // このドラッグ全体が「線を引く」か「消す」か(最初になぞった辺で決まる。null=未決定)
-  let gestureCellAdd = null; // このドラッグ全体が「塗る」か「消す」か(最初になぞったマスで決まる。null=未決定)
+  let gestureCellAdd = null; // 塗り/点ペンのドラッグ全体が「置く」か「消す」か(最初になぞったマスで決まる。null=未決定)
   let gestureLineCells = []; // 線ペンでなぞったマス(始点を含む)。「引く」と決まった時点で、それまでのマスにも点を打つため
 
   function eventToCanvasPos(e) {
@@ -763,7 +786,7 @@
     return [(e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY];
   }
 
-  // 塗りペンの1マス分の処理。黒マスと点は背反なので、点があれば(同色でも)塗れない。
+  // 塗りペンの1マス分の処理。黒マスと点・線は背反なので、点や線があれば(同色でも)塗れない。
   function handleBlackAt(cell) {
     const key = cellKey(cell[0], cell[1]);
     if (gestureTouched.has(key)) return;
@@ -776,7 +799,7 @@
     }
     if (gestureCellAdd) {
       // 所与の数字マスは塗りの対象外
-      if (state.blacks.get(key) === undefined && !clueMap.has(key) && !state.dots.has(key)) {
+      if (state.blacks.get(key) === undefined && !clueMap.has(key) && !state.dots.has(key) && !cellHasLine(cell[0], cell[1])) {
         state.blacks.set(key, gestureColor);
       }
     } else if (state.blacks.get(key) === gestureColor) {
@@ -784,17 +807,35 @@
     }
   }
 
-  // 線ペンのタップ。線が通っていないマスなら点をトグルする(他色の点があれば何もしない=排他)。
-  function handleDotTap(cell) {
+  // 点ペンの1マス分の処理。塗りと同じく、最初になぞったマスの状態でドラッグ全体の動作(打つ/消す)を固定する。
+  // 黒マスとは背反、他色の点は上書きしない(1マス1色)。
+  function handleDotAt(cell) {
     const key = cellKey(cell[0], cell[1]);
-    if (clueMap.has(key)) return;
-    if (cellHasLine(cell[0], cell[1])) return;
-    const existing = state.dots.get(key);
-    if (existing === gestureColor) {
-      state.dots.delete(key);
-    } else if (existing === undefined && !state.blacks.has(key)) {
-      state.dots.set(key, gestureColor);
+    if (gestureTouched.has(key)) return;
+    gestureTouched.add(key);
+
+    if (gestureCellAdd === null) {
+      gestureCellAdd = state.dots.get(key) !== gestureColor;
     }
+    if (gestureCellAdd) {
+      if (state.dots.get(key) === undefined && !clueMap.has(key) && !state.blacks.has(key)) {
+        state.dots.set(key, gestureColor);
+      }
+    } else if (state.dots.get(key) === gestureColor) {
+      state.dots.delete(key);
+    }
+  }
+
+  // 線ペンのタップ。そのマスに接する同色の線と、そのマスの同色の点を消す(線の反対側のマスの点は線消去の規則に従う)。
+  function handleLineTap(cell) {
+    const [r, c] = cell;
+    for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      if (state.lines.get(edgeKey(r, c, r + dr, c + dc)) === gestureColor) {
+        removeLineAndOrphanDots(r, c, r + dr, c + dc, gestureColor);
+      }
+    }
+    const key = cellKey(r, c);
+    if (state.dots.get(key) === gestureColor) state.dots.delete(key);
   }
 
   // 線を引くドラッグでなぞったマスに点を打つ。黒マスとは背反、他色の点は上書きしない(1マス1色)。
@@ -814,8 +855,10 @@
     const dr = curCell[0] - prevCell[0];
     const dc = curCell[1] - prevCell[1];
     if (Math.abs(dr) + Math.abs(dc) !== 1) return; // 隣接マスのみ線を引ける
-    // 数字マスには線が入らないため、数字マスを端点とする線は引けない
-    if (clueMap.has(cellKey(prevCell[0], prevCell[1])) || clueMap.has(cellKey(curCell[0], curCell[1]))) return;
+    // 数字マス・塗りマスには線が入らないため、それらを端点とする線は引けない
+    const prevKey = cellKey(prevCell[0], prevCell[1]);
+    const curKey = cellKey(curCell[0], curCell[1]);
+    if (clueMap.has(prevKey) || clueMap.has(curKey) || state.blacks.has(prevKey) || state.blacks.has(curKey)) return;
     const key = edgeKey(prevCell[0], prevCell[1], curCell[0], curCell[1]);
     if (gestureTouched.has(key)) return;
     gestureTouched.add(key);
@@ -834,14 +877,20 @@
         state.lines.set(key, gestureColor);
       }
     } else if (state.lines.get(key) === gestureColor) {
-      state.lines.delete(key);
+      removeLineAndOrphanDots(prevCell[0], prevCell[1], curCell[0], curCell[1], gestureColor);
     }
+  }
+
+  // マス単位で動作するペン(塗り・点)の振り分け
+  function handleCellPenAt(cell) {
+    if (gesturePen === "black") handleBlackAt(cell);
+    else handleDotAt(cell);
   }
 
   // ドラッグで新しいマスに入ったときの処理(ペンごとに振り分け)
   function handleEnterCell(cell) {
-    if (gesturePen === "black") {
-      handleBlackAt(cell);
+    if (gesturePen === "black" || gesturePen === "dot") {
+      handleCellPenAt(cell);
       lastCell = cell;
       return;
     }
@@ -881,8 +930,8 @@
     // 始点はなぞったマスに含める(点を打つのは「引く」と決まってから)
     gestureLineCells = gesturePen === "line" ? [cell] : [];
 
-    if (gesturePen === "black") {
-      handleBlackAt(cell);
+    if (gesturePen === "black" || gesturePen === "dot") {
+      handleCellPenAt(cell);
       draw();
     }
   }
@@ -912,9 +961,9 @@
   function onPointerUp(e) {
     if (!dragging) return;
     dragging = false;
-    // 線ペンで別のマスへ移らずに離した場合はタップとみなし、点を打つ/消す
+    // 線ペンで別のマスへ移らずに離した場合はタップとみなし、そのマスの線・点を消す
     if (gesturePen === "line" && !gestureMoved && gestureStartCell) {
-      handleDotTap(gestureStartCell);
+      handleLineTap(gestureStartCell);
       draw();
     }
     if (gestureBefore && gestureColor && recordColorChange(gestureColor, gestureBefore)) {
